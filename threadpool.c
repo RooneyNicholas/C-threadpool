@@ -20,8 +20,8 @@ struct tpool {
   node *tail; //queue tail
   int queue_size;
   pthread_mutex_t lock; //lock for queue
-  // pthread_cond_t empty_queue;
-  // pthread_cond_t non_empty_queue;
+  pthread_cond_t empty_queue;
+  pthread_cond_t non_empty_queue;
   pthread_t *threads; //thread array
 };
 
@@ -38,22 +38,22 @@ void *run_tasks(void *param) {
   tpool_t pool = (tpool_t) param;
   node *current;
   while(1) {
+    pthread_mutex_lock(&pool->lock);
+    while(pool->queue_size == 0) {
+      pthread_mutex_unlock(&pool->lock);
+      pthread_cond_wait(&pool->non_empty_queue, &pool->lock);
+    }
     current = pool->head;
     pool->queue_size--;
-    pthread_mutex_lock(&pool->lock);
-    // while(pool->queue_size == 0) {
-    //   pthread_mutex_unlock(&pool->lock);
-    //   pthread_cond_wait(&pool->non_empty_queue, &pool->lock);
-    // }
     if (pool->queue_size == 0) {
       pool->head = NULL;
       pool->tail = NULL;
     } else {
       pool->head = current->next;
     }
-    // if (!pool->queue_size) {
-    //   pthread_cond_signal(&pool->empty_queue);
-    // }
+    if (!pool->queue_size) {
+      pthread_cond_signal(&pool->empty_queue);
+    }
     pthread_mutex_unlock(&pool->lock);
     (current->fn)(pool, current->arg);
     free(current);
@@ -70,8 +70,8 @@ void tpool_init(tpool_t pool, unsigned int num_threads) {
   pool->head = NULL;
   pool->tail = NULL;
   pthread_mutex_init(&pool->lock, NULL);
-  // pthread_cond_init(&pool->empty_queue, NULL);
-  // pthread_cond_init(&pool->non_empty_queue, NULL);
+  pthread_cond_init(&pool->empty_queue, NULL);
+  pthread_cond_init(&pool->non_empty_queue, NULL);
 }
 
 /* Creates (allocates) and initializes a new thread pool. Also creates
@@ -85,7 +85,7 @@ tpool_t tpool_create(unsigned int num_threads) {
 
   /* TO BE COMPLETED BY THE STUDENT */
   tpool_t pool;
-  pool = (tpool_t) malloc(sizeof(tpool_t));
+  pool = (tpool_t) malloc(sizeof(struct tpool));
   if (!pool) {
     perror("Unable to allocate memory for the threadpool\n");
     return NULL;
@@ -138,7 +138,7 @@ void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) 
   if(pool->queue_size == 0) {
     pool->head = current;
     pool->tail = current;
-    // pthread_cond_signal(&pool->non_empty_queue);
+    pthread_cond_signal(&pool->non_empty_queue);
   } else {
     pool->tail->next = current;
     pool->tail = current;
@@ -157,10 +157,16 @@ void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) 
 void tpool_join(tpool_t pool) {
 
   /* TO BE COMPLETED BY THE STUDENT */
+  while(pool->queue_size > 0) {
+    pthread_cond_wait(&pool->empty_queue, &pool->lock);
+  }
+  pthread_cond_broadcast(&pool->non_empty_queue);
   for(int i = 0; i < pool->num_threads; i++) {
     pthread_join(pool->threads[i], NULL);
   }
   pthread_mutex_destroy(&pool->lock);
+  pthread_cond_destroy(&pool->empty_queue);
+  pthread_cond_destroy(&pool->non_empty_queue);
   free(pool->threads);
   free(pool);
 }
