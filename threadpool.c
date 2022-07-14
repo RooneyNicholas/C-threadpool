@@ -25,8 +25,10 @@ struct tpool {
   pthread_mutex_t lock; //lock for queue
   pthread_cond_t empty_queue;
   pthread_cond_t non_empty_queue;
+  pthread_cond_t tasks_running;
   pthread_t *threads; //thread array
   int shutdown;
+  int num_tasks_running;
 };
 
 /* Function executed by each pool worker thread. This function is
@@ -44,13 +46,13 @@ void *run_tasks(void *param) {
   while(1) {
     pthread_mutex_lock(&pool->lock);
     while(pool->queue_size == 0) {
-      if(pool->shutdown) {
+      if(pool->shutdown && !pool->num_tasks_running) {
         pthread_mutex_unlock(&pool->lock);
         pthread_exit(NULL);
       }
       pthread_mutex_unlock(&pool->lock);
       pthread_cond_wait(&pool->non_empty_queue, &pool->lock);
-      if(pool->shutdown) {
+      if(pool->shutdown && !pool->num_tasks_running) {
         pthread_mutex_unlock(&pool->lock);
         pthread_exit(NULL);
       }
@@ -68,6 +70,12 @@ void *run_tasks(void *param) {
     }
     pthread_mutex_unlock(&pool->lock);
     (current->fn)(pool, current->arg);
+    pthread_mutex_lock(&pool->lock);
+    pool->num_tasks_running--;
+    if(!pool->num_tasks_running) {
+      pthread_cond_broadcast(&pool->tasks_running);
+    }
+    pthread_mutex_unlock(&pool->lock);
     free(current);
   }
 }
@@ -83,9 +91,11 @@ void tpool_init(tpool_t pool, unsigned int num_threads) {
   pool->tail = NULL;
   pool->queue_size = 0;
   pool->shutdown = 0;
+  pool->num_tasks_running = 0;
   pthread_mutex_init(&pool->lock, NULL);
   pthread_cond_init(&pool->empty_queue, NULL);
   pthread_cond_init(&pool->non_empty_queue, NULL);
+  pthread_cond_init(&pool->tasks_running, NULL);
 }
 
 /* Creates (allocates) and initializes a new thread pool. Also creates
@@ -155,6 +165,7 @@ void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) 
     pool->tail = current;
   }
   pool->queue_size++;
+  pool->num_tasks_running++;
   pthread_mutex_unlock(&pool->lock);
 }
 
@@ -172,6 +183,9 @@ void tpool_join(tpool_t pool) {
     pthread_cond_wait(&pool->empty_queue, &pool->lock);
   }
   pool->shutdown = 1;
+  while(pool->num_tasks_running) {
+    pthread_cond_wait(&pool->tasks_running, &pool->lock);
+  }
   pthread_cond_broadcast(&pool->non_empty_queue);
   pthread_mutex_unlock(&pool->lock);
   for(int i = 0; i < pool->num_threads; i++) {
