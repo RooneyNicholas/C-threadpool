@@ -21,14 +21,14 @@ struct tpool {
   int num_threads; //number of threads we want
   node_t *head; //queue head
   node_t *tail; //queue tail
-  int queue_size;
+  int queue_size; //current size of queue
   pthread_mutex_t lock; //lock for queue
   pthread_cond_t empty_queue;
   pthread_cond_t non_empty_queue;
-  pthread_cond_t tasks_running;
+  pthread_cond_t tasks_running; //condition variable used to make sure all tasks are complete before we can shutdown
   pthread_t *threads; //thread array
-  int shutdown;
-  int num_tasks_running;
+  int is_killable; //check if the pool is ready to be killed
+  int num_tasks_running; //total currently running tasks
 };
 
 /* Function executed by each pool worker thread. This function is
@@ -46,13 +46,12 @@ void *run_tasks(void *param) {
   while(1) {
     pthread_mutex_lock(&pool->lock);
     while(pool->queue_size == 0) {
-      if(pool->shutdown && !pool->num_tasks_running) {
+      if(pool->is_killable && !pool->num_tasks_running) {
         pthread_mutex_unlock(&pool->lock);
         pthread_exit(NULL);
       }
-      pthread_mutex_unlock(&pool->lock);
       pthread_cond_wait(&pool->non_empty_queue, &pool->lock);
-      if(pool->shutdown && !pool->num_tasks_running) {
+      if(pool->is_killable && !pool->num_tasks_running) {
         pthread_mutex_unlock(&pool->lock);
         pthread_exit(NULL);
       }
@@ -65,7 +64,7 @@ void *run_tasks(void *param) {
     } else {
       pool->head = current->next;
     }
-    if (pool->queue_size == 0 && !pool->shutdown) {
+    if (pool->queue_size == 0 && !pool->is_killable) {
       pthread_cond_signal(&pool->empty_queue);
     }
     pthread_mutex_unlock(&pool->lock);
@@ -90,7 +89,7 @@ void tpool_init(tpool_t pool, unsigned int num_threads) {
   pool->head = NULL;
   pool->tail = NULL;
   pool->queue_size = 0;
-  pool->shutdown = 0;
+  pool->is_killable = 0;
   pool->num_tasks_running = 0;
   pthread_mutex_init(&pool->lock, NULL);
   pthread_cond_init(&pool->empty_queue, NULL);
@@ -109,7 +108,7 @@ tpool_t tpool_create(unsigned int num_threads) {
   tpool_t pool;
   pool = (tpool_t) malloc(sizeof(struct tpool));
   if (!pool) {
-    perror("Unable to allocate memory for the threadpool\n");
+    printf("Unable to allocate memory for the threadpool\n");
     return NULL;
   }
   
@@ -182,7 +181,7 @@ void tpool_join(tpool_t pool) {
   while(pool->queue_size != 0) {
     pthread_cond_wait(&pool->empty_queue, &pool->lock);
   }
-  pool->shutdown = 1;
+  pool->is_killable = 1;
   while(pool->num_tasks_running) {
     pthread_cond_wait(&pool->tasks_running, &pool->lock);
   }
