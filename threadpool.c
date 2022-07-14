@@ -6,6 +6,11 @@
 #include "threadpool.h"
 
 
+/* Begin prototypes*/
+void *run_tasks(void *);
+void tpool_init(tpool_t, unsigned int);
+/*End prototypes*/
+
 typedef struct node {
   void (*fn)(tpool_t, void*);
   void *arg;
@@ -13,8 +18,6 @@ typedef struct node {
 } node_t;
 
 struct tpool {
-
-  /* TO BE COMPLETED BY THE STUDENT */
   int num_threads; //number of threads we want
   node_t *head; //queue head
   node_t *tail; //queue tail
@@ -24,7 +27,6 @@ struct tpool {
   pthread_cond_t non_empty_queue;
   pthread_t *threads; //thread array
   int shutdown;
-  int dont_accept;
 };
 
 /* Function executed by each pool worker thread. This function is
@@ -79,8 +81,8 @@ void tpool_init(tpool_t pool, unsigned int num_threads) {
   }
   pool->head = NULL;
   pool->tail = NULL;
+  pool->queue_size = 0;
   pool->shutdown = 0;
-  pool->dont_accept = 0;
   pthread_mutex_init(&pool->lock, NULL);
   pthread_cond_init(&pool->empty_queue, NULL);
   pthread_cond_init(&pool->non_empty_queue, NULL);
@@ -94,8 +96,6 @@ void tpool_init(tpool_t pool, unsigned int num_threads) {
  * Returns: a pointer to the new thread pool object.
  */
 tpool_t tpool_create(unsigned int num_threads) {
-
-  /* TO BE COMPLETED BY THE STUDENT */
   tpool_t pool;
   pool = (tpool_t) malloc(sizeof(struct tpool));
   if (!pool) {
@@ -134,7 +134,6 @@ tpool_t tpool_create(unsigned int num_threads) {
  */
 void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) {
 
-  /* TO BE COMPLETED BY THE STUDENT */
   node_t *current;
   current = (node_t*) malloc(sizeof(node_t));
   if (!current) {
@@ -147,10 +146,6 @@ void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) 
   current->next = NULL;
 
   pthread_mutex_lock(&pool->lock);
-  if(pool->dont_accept) {
-    free(current);
-    return;
-  }
   if(pool->queue_size == 0) {
     pool->head = current;
     pool->tail = current;
@@ -172,7 +167,6 @@ void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) 
  */
 void tpool_join(tpool_t pool) {
 
-  /* TO BE COMPLETED BY THE STUDENT */
   pthread_mutex_lock(&pool->lock);
   while(pool->queue_size != 0) {
     pthread_cond_wait(&pool->empty_queue, &pool->lock);
