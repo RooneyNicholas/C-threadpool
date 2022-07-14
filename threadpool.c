@@ -8,7 +8,7 @@
 
 /* Begin prototypes*/
 void *run_tasks(void *);
-void tpool_init(tpool_t, unsigned int);
+int tpool_init(tpool_t, unsigned int);
 /*End prototypes*/
 
 typedef struct node {
@@ -72,7 +72,7 @@ void *run_tasks(void *param) {
     pthread_mutex_lock(&pool->lock);
     pool->num_tasks_running--;
     if(!pool->num_tasks_running) {
-      pthread_cond_broadcast(&pool->tasks_running);
+      pthread_cond_broadcast(&pool->tasks_running); //no tasks are running, and we can kill the threadpool
     }
     pthread_mutex_unlock(&pool->lock);
     free(current);
@@ -80,7 +80,7 @@ void *run_tasks(void *param) {
 }
 
 
-void tpool_init(tpool_t pool, unsigned int num_threads) {
+int tpool_init(tpool_t pool, unsigned int num_threads) {
   pool->num_threads = num_threads;
   pool->threads = (pthread_t* )malloc(num_threads * sizeof(pthread_t));
   for (int i = 0; i < num_threads; i++) {
@@ -91,10 +91,23 @@ void tpool_init(tpool_t pool, unsigned int num_threads) {
   pool->queue_size = 0;
   pool->is_killable = 0;
   pool->num_tasks_running = 0;
-  pthread_mutex_init(&pool->lock, NULL);
-  pthread_cond_init(&pool->empty_queue, NULL);
-  pthread_cond_init(&pool->non_empty_queue, NULL);
-  pthread_cond_init(&pool->tasks_running, NULL);
+  if (pthread_mutex_init(&pool->lock, NULL)) {
+    printf("Error initializing pool lock");
+    return 0;
+  }
+  if (pthread_cond_init(&pool->empty_queue, NULL)) {
+    printf("Error initializing condition variable empty_queue");
+    return 0;
+  }
+  if (pthread_cond_init(&pool->non_empty_queue, NULL)) {
+    printf("Error initializing condition variable non_empty_queue");
+    return 0;
+  }
+  if (pthread_cond_init(&pool->tasks_running, NULL)) {
+    printf("Error initializing condition variable tasks running");
+    return 0;
+  }
+  return 1;
 }
 
 /* Creates (allocates) and initializes a new thread pool. Also creates
@@ -112,12 +125,14 @@ tpool_t tpool_create(unsigned int num_threads) {
     return NULL;
   }
   
-  tpool_init(pool, num_threads);
+  if (!tpool_init(pool, num_threads)) {
+    return NULL;
+  }
 
   for (int i = 0; i < num_threads; i++) {
     if (pthread_create(&pool->threads[i], NULL, &run_tasks, pool))
     {
-      printf("unable to create thread\n");
+      printf("Unable to create thread:%d\n", i);
     }
   
   }
