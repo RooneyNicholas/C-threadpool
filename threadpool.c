@@ -46,12 +46,12 @@ void *run_tasks(void *param) {
   while(1) {
     pthread_mutex_lock(&pool->lock);
     while(pool->queue_size == 0) {
-      if(pool->is_killable && !pool->num_tasks_running) {
+      if(pool->is_killable && pool->num_tasks_running == 0) {
         pthread_mutex_unlock(&pool->lock);
         pthread_exit(NULL);
       }
       pthread_cond_wait(&pool->non_empty_queue, &pool->lock);
-      if(pool->is_killable && !pool->num_tasks_running) {
+      if(pool->is_killable && pool->num_tasks_running == 0) {
         pthread_mutex_unlock(&pool->lock);
         pthread_exit(NULL);
       }
@@ -69,12 +69,14 @@ void *run_tasks(void *param) {
     }
     pthread_mutex_unlock(&pool->lock);
     (current->fn)(pool, current->arg);
+
     pthread_mutex_lock(&pool->lock);
     pool->num_tasks_running--;
     if(!pool->num_tasks_running) {
       pthread_cond_broadcast(&pool->tasks_running); //no tasks are running, and we can kill the threadpool
     }
     pthread_mutex_unlock(&pool->lock);
+
     free(current);
   }
 }
@@ -133,6 +135,7 @@ tpool_t tpool_create(unsigned int num_threads) {
     if (pthread_create(&pool->threads[i], NULL, &run_tasks, pool))
     {
       printf("Unable to create thread:%d\n", i);
+      return NULL;
     }
   
   }
@@ -173,7 +176,7 @@ void tpool_schedule_task(tpool_t pool, void (*fun)(tpool_t, void *), void *arg) 
   if(pool->queue_size == 0) {
     pool->head = current;
     pool->tail = current;
-    pthread_cond_signal(&pool->non_empty_queue);
+    pthread_cond_signal(&pool->non_empty_queue); //signal threads that queue is now populated
   } else {
     pool->tail->next = current;
     pool->tail = current;
@@ -209,5 +212,6 @@ void tpool_join(tpool_t pool) {
   pthread_mutex_destroy(&pool->lock);
   pthread_cond_destroy(&pool->empty_queue);
   pthread_cond_destroy(&pool->non_empty_queue);
+  pthread_cond_destroy(&pool->tasks_running);
   free(pool);
 }
