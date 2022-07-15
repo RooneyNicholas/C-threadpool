@@ -85,9 +85,6 @@ void *run_tasks(void *param) {
 int tpool_init(tpool_t pool, unsigned int num_threads) {
   pool->num_threads = num_threads;
   pool->threads = (pthread_t* )malloc(num_threads * sizeof(pthread_t));
-  for (int i = 0; i < num_threads; i++) {
-    pool->threads[i] = (pthread_t) malloc(sizeof(pthread_t));
-  }
   pool->head = NULL;
   pool->tail = NULL;
   pool->queue_size = 0;
