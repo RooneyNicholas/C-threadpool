@@ -10,3 +10,4 @@ tpsample.c
 bruteforce.zip
 bruteforce.h
 bruteforce_main.c
+*.o
